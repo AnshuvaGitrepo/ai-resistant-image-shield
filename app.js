@@ -54,8 +54,8 @@
   let sourceImageEl = null; // loaded <img> for the main photo, clamped size drawn into originalCanvas
   let logoImageEl = null; // loaded <img> for the optional logo watermark
   let activeView = 'protected';
-  let isBusy = false;
   let renderTimer = null;
+  let renderGeneration = 0;
 
   // --- Helpers ---
   function clamp255(v) {
@@ -112,7 +112,6 @@
 
   // --- Main image drop zone ---
   dropZone.addEventListener('click', () => {
-    if (isBusy) return;
     imageInput.click();
   });
   dropZone.addEventListener('dragover', (e) => {
@@ -123,11 +122,9 @@
   dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
-    if (isBusy) return;
     if (e.dataTransfer.files && e.dataTransfer.files[0]) handleMainFile(e.dataTransfer.files[0]);
   });
   imageInput.addEventListener('change', (e) => {
-    if (isBusy) return;
     if (e.target.files && e.target.files[0]) handleMainFile(e.target.files[0]);
   });
 
@@ -232,12 +229,16 @@
 
   function renderNow() {
     if (!sourceImageEl) return;
-    isBusy = true;
+    const myGeneration = ++renderGeneration;
     loadingSpinner.classList.remove('d-none');
     statusAlert.classList.add('d-none');
 
     // Yield a tick so the spinner can paint before the (synchronous) pixel work.
     requestAnimationFrame(() => {
+      // A newer render (new image, or another control change) superseded this one
+      // while it was queued/running — drop this stale result instead of clobbering
+      // the newer one's output.
+      if (myGeneration !== renderGeneration) return;
       const start = performance.now();
       try {
         const w = originalCanvas.width;
@@ -266,6 +267,7 @@
           logoImg: logoImageEl
         });
 
+        if (myGeneration !== renderGeneration) return;
         setActiveView(activeView);
 
         const elapsed = Math.round(performance.now() - start);
@@ -274,10 +276,11 @@
         statusAlert.classList.remove('d-none');
       } catch (err) {
         console.error('Render error:', err);
-        alert('Error protecting image: ' + err.message);
+        if (myGeneration === renderGeneration) alert('Error protecting image: ' + err.message);
       } finally {
-        loadingSpinner.classList.add('d-none');
-        isBusy = false;
+        if (myGeneration === renderGeneration) {
+          loadingSpinner.classList.add('d-none');
+        }
       }
     });
   }
@@ -350,17 +353,24 @@
 
     ctx.save();
     ctx.globalAlpha = opacityValue;
+    if (type !== 'logo') {
+      ctx.fillStyle = color;
+      ctx.font = `bold ${size}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+    }
     const angleRad = (angleDeg * Math.PI) / 180;
 
     if (layout === 'center-stamp') {
       ctx.translate(width / 2, height / 2);
       ctx.rotate(angleRad);
-      drawMark(ctx, 0, 0, type, text, color, size, logoImg);
+      drawMark(ctx, 0, 0, type, text, size, logoImg);
     } else if (layout === 'corner') {
-      const pad = size * 1.2;
+      // Clamp so a large watermark on a small image still lands on-canvas.
+      const pad = Math.min(size * 1.2, width * 0.45, height * 0.45);
       ctx.translate(width - pad, height - pad);
       ctx.rotate(angleRad);
-      drawMark(ctx, 0, 0, type, text, color, size, logoImg);
+      drawMark(ctx, 0, 0, type, text, size, logoImg);
     } else {
       const spacingX = layout === 'dense-diagonal' ? size * 3 : size * 4.5;
       const spacingY = layout === 'dense-diagonal' ? size * 2.2 : size * 4.5;
@@ -369,23 +379,19 @@
       const diag = Math.sqrt(width * width + height * height);
       for (let y = -diag; y < diag; y += spacingY) {
         for (let x = -diag; x < diag; x += spacingX) {
-          drawMark(ctx, x, y, type, text, color, size, logoImg);
+          drawMark(ctx, x, y, type, text, size, logoImg);
         }
       }
     }
     ctx.restore();
   }
 
-  function drawMark(ctx, x, y, type, text, color, size, logoImg) {
+  function drawMark(ctx, x, y, type, text, size, logoImg) {
     if (type === 'logo' && logoImg) {
       const w = size * 2;
       const h = (logoImg.naturalHeight / logoImg.naturalWidth) * w || size * 2;
       ctx.drawImage(logoImg, x - w / 2, y - h / 2, w, h);
     } else {
-      ctx.fillStyle = color;
-      ctx.font = `bold ${size}px system-ui, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
       ctx.fillText(text || 'PROTECTED', x, y);
     }
   }
