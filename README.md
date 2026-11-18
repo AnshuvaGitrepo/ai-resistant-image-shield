@@ -60,4 +60,9 @@ cd ai-resistant-image
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 AnshuvaGitrepo
+
+<p align="center">
+  <img src="docs/logo.svg" alt="AI-Resistant Image Shield logo" width="72"><br>
+  <sub>Prepared by Anshuva Samanta</sub>
+</p>
